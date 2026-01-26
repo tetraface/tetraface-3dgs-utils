@@ -1,4 +1,4 @@
-# transforms.json converter from equirectangular to cubemap
+# cubemap_transforms_json.py : transforms.json converter from equirectangular to cubemap
 
 This script converts `transforms.json` for **360° equirectangular image** by [metashape_360_lfs](https://github.com/gradeeterna/metashape_360_lfs) into **cubemap-based images**.
 
@@ -6,10 +6,11 @@ That is, the following conversions are possible:
 
 Metashape (Standard/Professional) > xml/pointcloud > transforms.json > cubemap > 3DGS software ([Jawset Postshot](https://www.jawset.com/), [Brush](https://github.com/ArthurBrussee/brush), [LichtFeld Studio](https://github.com/MrNeRF/LichtFeld-Studio), etc...)
 
+[JP 日本語の説明](README.ja.md)
 
 ## Requirements
 
-- Python 3.x
+- Python 3.x (3.11.8 confirmed)
 - NumPy
 - OpenCV
 - Pillow
@@ -102,7 +103,7 @@ By default, coordinate axis transformation suitable for Postshot/Brush is perfor
 ```
 python metashape_360_lfs.py --images images --xml metashape.xml \
   --ply metashape.ply --output .
-python cubemap_transforms_json.py . ./cubic --no_tranformation
+python cubemap_transforms_json.py . ./cubic --no_tranform
 ```
 
 ### Options
@@ -113,7 +114,7 @@ python cubemap_transforms_json.py . ./cubic --no_tranformation
 |--stitch|Angle to avoid stitching areas (default=0.0 degrees)|
 |--fov|Field of view for cubemap faces (default=90.0 degrees)|
 |--no_image|Disable image conversion. Only transforms.json will be converted.|
-|--no_tranform|Disable coordinate axis conversion.|
+|--no_transform|Disable coordinate axis conversion.|
 
 ## Import into 3DGS software
 
