@@ -1,135 +1,46 @@
-# cubemap_transforms_json.py : transforms.json converter from equirectangular to cubemap
+# tetraface-3dgs-utils
 
-This script converts `transforms.json` for **360° equirectangular image** by [metashape_360_lfs](https://github.com/gradeeterna/metashape_360_lfs) into **cubemap-based images**.
-
-That is, the following conversions are possible:
-
-Metashape (Standard/Professional) > xml/pointcloud > transforms.json > cubemap > 3DGS software ([Jawset Postshot](https://www.jawset.com/), [Brush](https://github.com/ArthurBrussee/brush), [LichtFeld Studio](https://github.com/MrNeRF/LichtFeld-Studio), etc...)
+A collection of scripts I use and develop as part of a 3D Gaussian Splatting (3DGS) workflow.
 
 [JP 日本語の説明](README.ja.md)
 
 ## Requirements
 
-- Python 3.x (3.11.8 confirmed)
+- [CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive) (for GPU-enabled PyTorch workflows)
+- [Python 3.x](https://www.python.org/) (confirmed with 3.11.8)
+- [metashape_360_lfs.py (fork)](https://github.com/tetraface/metashape_360_lfs)
+
+### Depended python modules
+
 - NumPy
 - OpenCV
 - Pillow
-- Open3D (used in metashape_360_lfs)
-- [metashape_360_lfs.py](https://github.com/gradeeterna/metashape_360_lfs) 
+- Open3D (used by `metashape_360_lfs`)
+- PyTorch 2.8.0 (with CUDA 12.8)
+- ultralytics
+- tqdm
 
-```
-pip install numpy opencv-python Pillow open3d
-```
+Install example (CUDA 12.8 PyTorch wheel + other deps):
 
-## Directory structure
-
-### Input directory example
-
-```
-input_dir/
-├─ metashape.xml
-├─ metashape.ply
-├─ transforms.json
-├─ pointcloud.ply (optional)
-├─ images/
-│ ├─ image_000.jpg (or .png)
-│ └─ image_001.jpg
-│ └─ ...
-└─ masks/ # (optional)
-  ├─ image_000.png (or .jpg.png, .png.png)
-  └─ image_001.png
-  └─ ...
+```bash
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+pip install numpy opencv-python Pillow open3d ultralytics tqdm
 ```
 
-| File | Description |
-|------|-------------|
-|metashape.ply|Expoted in Metashape [File > Export > Export Point Cloud]|
-|metashape.xml|Expoted in Metashape [File > Export > Export Cameras]|
-|transforms.json|Converted by metashape_360_lfs|
-|pointcloud.ply|Converted by metashape_360_lfs (optional)|
+## Summary of scripts
 
-### Output directory example
+### `cubemap_transforms_json.py`
 
-```
-output_dir/
-├─ transforms.json
-├─ images/
-│ ├─ image_000_nx.jpg (or .png)
-│ ├─ image_000_ny.jpg
-│ ├─ image_000_nz.jpg
-│ ├─ image_000_px.jpg
-│ ├─ image_000_py.jpg
-│ ├─ image_000_pz.jpg
-│ ├─ image_001_nx.jpg
-│ └─ ...
-└─ masks/
-  ├─ image_000_nx.png
-│ └─ ...
-```
+Convert transforms.json produced for 360° equirectangular data (by `metashape_360_lfs`) into a cubemap-friendly format usable by common 3DGS tools. See detailed documentation: [doc/cubemap_transforms_json.md](doc/cubemap_transforms_json.md).
 
+### `stitch_mask.py`
 
-## Usage
+Generate masks that exclude angular regions outside the two fisheye lenses in a 360° image. Useful when stitch seams become visible (for example in tight indoor scenes). See details: [doc/stitch_mask.md](doc/stitch_mask.md)
+![mask example](images/stitch_mask.png)
 
-### Basic usage
+### `yolo_mask.py`
 
-Convert transforms.json and images in the current directory: (also convert if masks directory exists)
-```
-python metashape_360_lfs.py --images images --xml metashape.xml --output .
-python cubemap_transforms_json.py .
-```
+Detect people in 360° images and generate mask PNGs.
+See details: [doc/yolo_mask.md](doc/yolo_mask.md)
+![mask example](images/yolo_mask.png)
 
-### Detailed
-
-With specifying output directory:
-```
-python cubemap_transforms_json.py . ./cubic
-```
-
-With options:
-
-```
-python cubemap_transforms_json.py . ./cubic \
-  --yaw 45 \
-  --stitch 2.5 \
-  --fov 90
-```
-
-Specifying `--yaw 45 --stitch DEGREE` will prevent the stitching area between two fisheye images from crossing the center of the cubemap image. These options are effective for Insta360 and OSMO 360 images without any image correction like camera tilt and stitching.
-
-### For LichtFeld Studio
-
-By default, coordinate axis transformation suitable for Postshot/Brush is performed. For LichtFeld Studio, specify `--no_transform`.
-
-```
-python metashape_360_lfs.py --images images --xml metashape.xml \
-  --ply metashape.ply --output .
-python cubemap_transforms_json.py . ./cubic --no_tranform
-```
-
-### Options
-
-|Option|Description|
-|------|-----------|
-|--yaw|Shift the horizontal angle (default=45.0 degrees)|
-|--stitch|Angle to avoid stitching areas (default=0.0 degrees)|
-|--fov|Field of view for cubemap faces (default=90.0 degrees)|
-|--no_image|Disable image conversion. Only transforms.json will be converted.|
-|--no_transform|Disable coordinate axis conversion.|
-
-## Import into 3DGS software
-
-Import the following files in each software:
-
-### Postshot / Brush
-
-- metashape.ply (exported in `Metashape`)
-- transforms.json (in the output directory)
-- images (in the output directory)
-- masks (in the output directory: optional)
-
-### LichtFeld Studio
-
-- pointcloud.ply (converted by `metashape_360_lfs`)
-- transforms.json (in the output directory)
-- images (in the output directory)
-- masks (in the output directory: optional)

@@ -20,27 +20,41 @@ class MyParser(argparse.ArgumentParser):
 parser = MyParser(description="Convert transform.json from equirectanglar to cubemap.", formatter_class=argparse.RawDescriptionHelpFormatter, epilog=example_text)
 parser.add_argument("input_dir", help="Input directory contains 'transforms.json' file and 'images' directory")
 parser.add_argument("output_dir", nargs="?", help="Output directory for cubified data (default='./cubic')")
+parser.add_argument("--json", help="transforms.json with a different filename (default='transforms.json')")
 parser.add_argument("--mask_dir", help="Input mask images directory (default='./masks')")
+parser.add_argument("--mask_from_alpha", action="store_true", help="Extract masks from alpha channel in images")
 parser.add_argument("--yaw", type=float, default=45.0, help="Shift the horizontal angle (default=45.0 degrees)")
 parser.add_argument("--stitch", type=float, default=0.0, help="Angle to avoid stitching areas (default=0.0 degrees)")
 parser.add_argument("--fov", type=float, default=90.0, help="Field of view for cubemap faces (default=90.0 degrees)")
+parser.add_argument("--no_bottom", action="store_true", help="Output without a bottom face of cube-map")
+parser.add_argument("--no_top", action="store_true", help="Output without a top face of cube-map")
 parser.add_argument("--no_image", action="store_true", help="Without cube-map conversion of images & masks")
 parser.add_argument("--no_transform", action="store_true", help="No transformation of coordinates for LichtFeld Studio")
+parser.add_argument("--duplicate", action="store_true", help="Allow duplicated image files by merging chunks")
 args = parser.parse_args()
 
 INPUT_DIR = args.input_dir
 OUTPUT_DIR = args.output_dir if args.output_dir else f"{INPUT_DIR}/cubic"
+INPUT_JSON = args.json if args.json else "transforms.json"
 IMAGE_DIR = INPUT_DIR
 MASK_DIR = args.mask_dir if args.mask_dir else f"{INPUT_DIR}/masks"
+OUTPUT_XML = args.output_xml
 OUTPUT_IMAGE_DIR = f"{OUTPUT_DIR}/images"
 OUTPUT_MASK_DIR = f"{OUTPUT_DIR}/masks"
-YAW = args.yaw if args.yaw else 45.0
-STITCH = args.stitch if args.stitch else 0.0
-FOV = args.fov if args.fov else 90.0
+MASK_FROM_ALPHA = args.mask_from_alpha
+YAW = args.yaw
+STITCH = args.stitch
+FOV = args.fov
+NO_BOTTOM = args.no_bottom
+NO_TOP = args.no_top
 NO_IMAGE  = args.no_image
 NO_TRANSFORM = args.no_transform
+ALLOW_DUPLICATE = args.duplicate
 _WORKER_REMAP_TABLES = None
 
+if args.mask_dir and not os.path.isdir(MASK_DIR):
+    print(f"Error: mask_dir '{MASK_DIR}' not found")
+    sys.exit(1)
 
 def rot4(R3):
     R4 = np.eye(4)
@@ -56,6 +70,10 @@ R_faces = [
     ("pz", 0-YAW+STITCH, 0),
     ("nz", 180-YAW+STITCH, 0)
 ]
+if NO_TOP:
+    R_faces = [f for f in R_faces if f[0] != "py"]
+if NO_BOTTOM:
+    R_faces = [f for f in R_faces if f[0] != "ny"]
 
 # ==========================
 # Get rotation matrix from yaw/pitch
@@ -129,10 +147,14 @@ def remap_image(input_file, output_dir, REMAP_TABLES):
 
     if img.mode == "L":
         equi = np.array(img)
-        is_gray = True
+        mode_for_pil = "L"
+    elif img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+        # 透過情報がある場合 (RGBA, LA, または透過ありパレット)
+        equi = np.array(img.convert("RGBA"))
+        mode_for_pil = "RGBA"
     else:
         equi = np.array(img.convert("RGB"))
-        is_gray = False
+        mode_for_pil = "RGB"
 
     for face, _, _ in R_faces:
         map_x, map_y = REMAP_TABLES[face]
@@ -145,16 +167,32 @@ def remap_image(input_file, output_dir, REMAP_TABLES):
             borderMode=cv2.BORDER_WRAP
         )
 
-        if is_gray:
+        if mode_for_pil == "L":
             _, view = cv2.threshold(view, 127, 255, cv2.THRESH_BINARY)
 
         out_path = os.path.join(output_dir, basename+f"_{face}{ext2}{ext}")
-        Image.fromarray(view).save(out_path)
+        if MASK_FROM_ALPHA and mode_for_pil == "RGBA":
+            # convert view to pil image
+            view_rgb = np.array(Image.fromarray(view, mode="RGBA").convert("RGB"))
+            # Save RGB image
+            Image.fromarray(view_rgb, mode="RGB").save(out_path)
+            # Alphaチャンネルからマスクを生成
+            alpha_channel = view[..., -1]
+            _, mask = cv2.threshold(alpha_channel, 127, 255, cv2.THRESH_BINARY)
+            mask_out_path = os.path.join(OUTPUT_MASK_DIR, basename+f"_{face}{ext2}.png")
+            Image.fromarray(mask, mode="L").save(mask_out_path)
+        else:
+            Image.fromarray(view, mode=mode_for_pil).save(out_path)
         
+def rotation_angle_diff(R1, R2):
+    R = R1.T @ R2
+    cos_theta = (np.trace(R) - 1) / 2
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)  # 数値誤差対策
+    return np.arccos(cos_theta)
 
 def transform_json():
     # Open transforms.json
-    path = os.path.join(INPUT_DIR, "transforms.json")
+    path = os.path.join(INPUT_DIR, INPUT_JSON)
     if not os.path.exists(path):
         print(f"Error: {path} not found")
         return [], [], 0
@@ -183,10 +221,18 @@ def transform_json():
 
     new_frames = []
     image_files = []
-    for frame in data["frames"]:    
+    image_map = {}
+    for frame in data["frames"]:
+        if not ALLOW_DUPLICATE and frame["file_path"] in image_map:
+            R_diff = rotation_angle_diff(image_map[frame["file_path"]][:3,:3], np.array(frame["transform_matrix"])[:3,:3])
+            T_diff = image_map[frame["file_path"]][:3,3] - np.array(frame["transform_matrix"])[:3,3]
+            print(f"Skipped duplicated image: {frame['file_path']} (diff={np.rad2deg(R_diff):.3f} deg, {np.linalg.norm(T_diff):.4f} dist.)")
+            continue
+
         T = np.array(frame["transform_matrix"])
         T_world = A @ T  # apply transformation
 
+        image_map[frame["file_path"]] = T
         image_files.append(frame["file_path"])
 
         for face, yaw, pitch in R_faces:
@@ -218,7 +264,6 @@ def transform_json():
             new_frames.append(f2)
 
     out = {
-        #"camera_model": "PERSPECTIVE",
         "camera_model": "SIMPLE_PINHOLE",
         "w": OUTPUT_SIZE,
         "h": OUTPUT_SIZE,
@@ -243,19 +288,19 @@ def proc_convert_images(file):
     global _WORKER_REMAP_TABLES
 
     # ---- 4. Image & mask conversion ----
-    #for file in image_files:
     image = os.path.join(IMAGE_DIR, file)
     if os.path.exists(image):
         remap_image(image, OUTPUT_IMAGE_DIR, _WORKER_REMAP_TABLES)
-    masks = [
-        os.path.join(MASK_DIR, os.path.basename(file)),
-        os.path.join(MASK_DIR, os.path.basename(file)+".png"),
-        os.path.join(MASK_DIR, os.path.basename(file)).replace(".jpg", ".png")
-    ]
-    for mask in masks:
-        if os.path.exists(mask):
-            remap_image(mask, OUTPUT_MASK_DIR, _WORKER_REMAP_TABLES)
-            break
+    if not MASK_FROM_ALPHA and os.path.isdir(MASK_DIR):
+        masks = [
+            os.path.join(MASK_DIR, os.path.basename(file)),
+            os.path.join(MASK_DIR, os.path.basename(file)+".png"),
+            os.path.join(MASK_DIR, os.path.basename(file)).replace(".jpg", ".png")
+        ]
+        for mask in masks:
+            if os.path.exists(mask):
+                remap_image(mask, OUTPUT_MASK_DIR, _WORKER_REMAP_TABLES)
+                break
 
 def worker_init(input_size, fov, output_size):
     global _WORKER_REMAP_TABLES
@@ -267,7 +312,7 @@ def worker_init(input_size, fov, output_size):
         )
 
 def convert_images(image_files, input_size, output_size):
-    print("Convert images...")
+    print(f"Converting {len(image_files)} images...")
 
     max_workers = min(16, os.cpu_count())
 
@@ -282,7 +327,8 @@ def convert_images(image_files, input_size, output_size):
     """
 
     os.makedirs(OUTPUT_IMAGE_DIR, exist_ok=True)
-    os.makedirs(OUTPUT_MASK_DIR, exist_ok=True)
+    if MASK_FROM_ALPHA or os.path.isdir(MASK_DIR):
+        os.makedirs(OUTPUT_MASK_DIR, exist_ok=True)
 
     # Convert images in parallel
     with ProcessPoolExecutor(
