@@ -31,16 +31,19 @@ pip install numpy opencv-python Pillow open3d ultralytics tqdm
 
 ### `cubemap_transforms_json.py`
 
-Convert transforms.json produced for 360° equirectangular data (by `metashape_360_lfs`) into a cubemap-friendly format usable by common 3DGS tools. See detailed documentation: [doc/cubemap_transforms_json.md](doc/cubemap_transforms_json.md).
+Convert transforms.json produced for 360° equirectangular data (by `metashape_360_lfs`) into a cubemap-friendly format usable by common 3DGS tools.<br>
+See detailed documentation: [doc/cubemap_transforms_json.md](doc/cubemap_transforms_json.md).<br>
+![mask example](images/yaw45.jpg)
 
 ### `stitch_mask.py`
 
-Generate masks that exclude angular regions outside the two fisheye lenses in a 360° image. Useful when stitch seams become visible (for example in tight indoor scenes). See details: [doc/stitch_mask.md](doc/stitch_mask.md)
+Generate masks that exclude angular regions outside the two fisheye lenses in a 360° image. Useful when stitch seams become visible (for example in tight indoor scenes).<br>
+See details: [doc/stitch_mask.md](doc/stitch_mask.md)<br>
 ![mask example](images/stitch_mask.png)
 
 ### `yolo_mask.py`
 
-Detect people in 360° images and generate mask PNGs.
-See details: [doc/yolo_mask.md](doc/yolo_mask.md)
+Detect people in 360° images and generate mask PNGs.<br>
+See details: [doc/yolo_mask.md](doc/yolo_mask.md)<br>
 ![mask example](images/yolo_mask.png)
 
