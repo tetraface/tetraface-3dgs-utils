@@ -38,7 +38,6 @@ OUTPUT_DIR = args.output_dir if args.output_dir else f"{INPUT_DIR}/cubic"
 INPUT_JSON = args.json if args.json else "transforms.json"
 IMAGE_DIR = INPUT_DIR
 MASK_DIR = args.mask_dir if args.mask_dir else f"{INPUT_DIR}/masks"
-OUTPUT_XML = args.output_xml
 OUTPUT_IMAGE_DIR = f"{OUTPUT_DIR}/images"
 OUTPUT_MASK_DIR = f"{OUTPUT_DIR}/masks"
 MASK_FROM_ALPHA = args.mask_from_alpha
