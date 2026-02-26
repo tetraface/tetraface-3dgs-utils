@@ -31,6 +31,7 @@ parser.add_argument("--no_top", action="store_true", help="Output without a top 
 parser.add_argument("--no_image", action="store_true", help="Without cube-map conversion of images & masks")
 parser.add_argument("--no_transform", action="store_true", help="No transformation of coordinates for LichtFeld Studio")
 parser.add_argument("--duplicate", action="store_true", help="Allow duplicated image files by merging chunks")
+parser.add_argument("--brush", action="store_true", help="Transform axes for Brush")
 args = parser.parse_args()
 
 INPUT_DIR = args.input_dir
@@ -49,6 +50,7 @@ NO_TOP = args.no_top
 NO_IMAGE  = args.no_image
 NO_TRANSFORM = args.no_transform
 ALLOW_DUPLICATE = args.duplicate
+BRUSH_MODE = args.brush
 _WORKER_REMAP_TABLES = None
 
 if args.mask_dir and not os.path.isdir(MASK_DIR):
@@ -148,7 +150,7 @@ def remap_image(input_file, output_dir, REMAP_TABLES):
         equi = np.array(img)
         mode_for_pil = "L"
     elif img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        # 透過情報がある場合 (RGBA, LA, または透過ありパレット)
+        # With alpha channel (RGBA, LA, or palettes with transparency)
         equi = np.array(img.convert("RGBA"))
         mode_for_pil = "RGBA"
     else:
@@ -175,7 +177,7 @@ def remap_image(input_file, output_dir, REMAP_TABLES):
             view_rgb = np.array(Image.fromarray(view, mode="RGBA").convert("RGB"))
             # Save RGB image
             Image.fromarray(view_rgb, mode="RGB").save(out_path)
-            # Alphaチャンネルからマスクを生成
+            # Generate縲mask from alpha channel
             alpha_channel = view[..., -1]
             _, mask = cv2.threshold(alpha_channel, 127, 255, cv2.THRESH_BINARY)
             mask_out_path = os.path.join(OUTPUT_MASK_DIR, basename+f"_{face}{ext2}.png")
@@ -186,7 +188,7 @@ def remap_image(input_file, output_dir, REMAP_TABLES):
 def rotation_angle_diff(R1, R2):
     R = R1.T @ R2
     cos_theta = (np.trace(R) - 1) / 2
-    cos_theta = np.clip(cos_theta, -1.0, 1.0)  # 数値誤差対策
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)
     return np.arccos(cos_theta)
 
 def transform_json():
@@ -217,6 +219,9 @@ def transform_json():
         A = np.eye(4) # for LichtFeld Studio
     else:
         A = rot4(np.array([[0,0,-1],[1,0,0],[0,-1,0]])) # for Postshot/Brush
+        if BRUSH_MODE:
+            B = rot4(np.array([[1,0,0],[0,0,1],[0,-1,0]])) # for Brush
+            A = B @ A
 
     new_frames = []
     image_files = []

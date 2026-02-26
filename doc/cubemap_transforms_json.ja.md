@@ -96,7 +96,14 @@ python cubemap_transforms_json.py . ./cubic \
 
 ### LichtFeld Studio向け
 
-デフォルトでは、Postshot/Brush に適した座標軸変換が行われます。LichtFeld Studioの場合、 `--no_transform` を指定してください。
+デフォルトでは、Postshot に適した座標軸変換が行われます。Brushの場合、 `--brush` を指定してください。
+
+```
+python metashape_360_lfs.py --images images --xml metashape.xml --output .
+python cubemap_transforms_json.py . ./cubic --brush
+```
+
+LichtFeld Studioの場合、 `--no_transform` を指定してください。
 
 ```
 python metashape_360_lfs.py --images images --xml metashape.xml \
@@ -118,6 +125,7 @@ python cubemap_transforms_json.py . ./cubic --no_tranform
 |--no_top|(no)|キューブマップの上面を除外して出力|
 |--no_image|(no)|画像の変換を行わず、transforms.json の変換のみ行います|
 |--no_transform|(no)|座標軸変換を行いません|
+|--brush|(no)|Brush向けの座標変換を行います|
 |--duplicate|(no)|マージされたチャンク間で同名の画像を許可|
 
 ## 3DGSソフトウェアへのインポート
