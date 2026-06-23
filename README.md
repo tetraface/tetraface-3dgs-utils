@@ -2,6 +2,8 @@
 
 A collection of scripts I use and develop as part of a 3D Gaussian Splatting (3DGS) workflow.
 
+This project is no longer updated. Please use [PointPort](https://tetraface.co.jp/3dgs/point-port/) instead.
+
 [JP 日本語の説明](README.ja.md)
 
 ## Requirements

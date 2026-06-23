@@ -29,10 +29,15 @@ parser.add_argument("--fov", type=float, default=90.0, help="Field of view for c
 parser.add_argument("--no_bottom", action="store_true", help="Output without a bottom face of cube-map")
 parser.add_argument("--no_top", action="store_true", help="Output without a top face of cube-map")
 parser.add_argument("--no_image", action="store_true", help="Without cube-map conversion of images & masks")
-parser.add_argument("--no_transform", action="store_true", help="No transformation of coordinates for LichtFeld Studio")
-parser.add_argument("--duplicate", action="store_true", help="Allow duplicated image files by merging chunks")
+parser.add_argument("--no_transform", action="store_true", help="No transformation of coordinates for LichtFeld Studio 0.5.1 or earlier")
+parser.add_argument("--lfs", action="store_true", help="Transform axes for LichtFeld Studio 0.5.2 or later")
 parser.add_argument("--brush", action="store_true", help="Transform axes for Brush")
+parser.add_argument("--duplicate", action="store_true", help="Allow duplicated image files by merging chunks")
+parser.add_argument("--interval", type=float, default=1.0, help="Convert 1 frame every N frames when N > 1 (supports decimals)")
 args = parser.parse_args()
+
+if args.interval <= 0:
+    parser.error("--interval must be greater than 0")
 
 INPUT_DIR = args.input_dir
 OUTPUT_DIR = args.output_dir if args.output_dir else f"{INPUT_DIR}/cubic"
@@ -50,9 +55,14 @@ NO_TOP = args.no_top
 NO_IMAGE  = args.no_image
 NO_TRANSFORM = args.no_transform
 ALLOW_DUPLICATE = args.duplicate
+LFS_MODE = args.lfs
 BRUSH_MODE = args.brush
+INTERVAL = args.interval
 _WORKER_REMAP_TABLES = None
 
+if NO_TRANSFORM and (LFS_MODE or BRUSH_MODE):
+    print("Error: --no_transform cannot be used with --lfs or --brush")
+    sys.exit(1)
 if args.mask_dir and not os.path.isdir(MASK_DIR):
     print(f"Error: mask_dir '{MASK_DIR}' not found")
     sys.exit(1)
@@ -177,7 +187,7 @@ def remap_image(input_file, output_dir, REMAP_TABLES):
             view_rgb = np.array(Image.fromarray(view, mode="RGBA").convert("RGB"))
             # Save RGB image
             Image.fromarray(view_rgb, mode="RGB").save(out_path)
-            # Generate　mask from alpha channel
+            # Generate mask from alpha channel
             alpha_channel = view[..., -1]
             _, mask = cv2.threshold(alpha_channel, 127, 255, cv2.THRESH_BINARY)
             mask_out_path = os.path.join(OUTPUT_MASK_DIR, basename+f"_{face}{ext2}.png")
@@ -191,12 +201,45 @@ def rotation_angle_diff(R1, R2):
     cos_theta = np.clip(cos_theta, -1.0, 1.0)
     return np.arccos(cos_theta)
 
+def make_face_output_path(file_path, face):
+    root, ext = os.path.splitext(file_path)
+    return f"{root}_{face}{ext}".replace("\\", "/")
+
 def transform_json():
-    # Open transforms.json
+    # Check if transforms.json exists
     path = os.path.join(INPUT_DIR, INPUT_JSON)
     if not os.path.exists(path):
-        print(f"Error: {path} not found")
-        return [], [], 0
+        print(f"Warning: {path} not found. Converting only images in '{INPUT_DIR}/images'.")
+        # Enumerate images in the input directory
+        image_root = os.path.join(INPUT_DIR, "images")
+        if not os.path.isdir(image_root):
+            print(f"Error: {image_root} not found")
+            return [], [], 0
+
+        exts = {".jpg", ".jpeg", ".png"}
+        image_files = []
+        for root, _, files in os.walk(image_root):
+            for name in files:
+                if os.path.splitext(name)[1].lower() in exts:
+                    abs_path = os.path.join(root, name)
+                    rel_path = os.path.relpath(abs_path, INPUT_DIR)
+                    image_files.append(rel_path.replace("\\", "/"))
+
+        image_files.sort()
+        if len(image_files) == 0:
+            print(f"Error: no images found in {image_root}")
+            return [], [], 0
+
+        # Check the image size by the first file
+        INPUT_SIZE = [7840, 3920]
+        OUTPUT_SIZE = 1920
+        first_img = Image.open(os.path.join(INPUT_DIR, image_files[0]))
+        INPUT_SIZE[0], INPUT_SIZE[1] = first_img.size
+        OUTPUT_SIZE = INPUT_SIZE[1] // 2
+
+        return image_files, INPUT_SIZE, OUTPUT_SIZE
+    
+    # ---- Open transforms.json ----
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -216,7 +259,9 @@ def transform_json():
 
     # ---- Convert json ----
     if NO_TRANSFORM:
-        A = np.eye(4) # for LichtFeld Studio
+        A = np.eye(4) # for LichtFeld Studio 0.5.1 or earlier
+    elif LFS_MODE:
+        A = rot4(np.array([[0,0,1],[0,-1,0],[1,0,0]])) # for LichtFeld Studio 0.5.2 or later
     else:
         A = rot4(np.array([[0,0,-1],[1,0,0],[0,-1,0]])) # for Postshot/Brush
         if BRUSH_MODE:
@@ -226,7 +271,14 @@ def transform_json():
     new_frames = []
     image_files = []
     image_map = {}
-    for frame in data["frames"]:
+    next_sample_index = 0.0
+    for frame_index, frame in enumerate(data["frames"]):
+        # Keep 1 frame every INTERVAL frames when INTERVAL > 1.
+        if INTERVAL > 1.0:
+            if frame_index + 1e-9 < next_sample_index:
+                continue
+            next_sample_index += INTERVAL
+
         if not ALLOW_DUPLICATE and frame["file_path"] in image_map:
             R_diff = rotation_angle_diff(image_map[frame["file_path"]][:3,:3], np.array(frame["transform_matrix"])[:3,:3])
             T_diff = image_map[frame["file_path"]][:3,3] - np.array(frame["transform_matrix"])[:3,3]
@@ -241,14 +293,7 @@ def transform_json():
 
         for face, yaw, pitch in R_faces:
             f2 = {}
-            if frame["file_path"].endswith(".png"):
-                f2["file_path"] = frame["file_path"].replace(
-                    ".png", f"_{face}.png"
-                )
-            elif frame["file_path"].endswith(".jpg"):
-                f2["file_path"] = frame["file_path"].replace(
-                    ".jpg", f"_{face}.jpg"
-                )
+            f2["file_path"] = make_face_output_path(frame["file_path"], face)
 
             R = rotation_matrix(yaw, pitch, True)
             T_face = T_world @ rot4(R.T)
